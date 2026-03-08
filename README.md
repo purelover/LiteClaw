@@ -112,7 +112,7 @@ cp config.example.yaml config.yaml
 | `tools.automation` | cron_list、gateway_status |
 | `tools.memory` | 工作区记忆（memory_get/search/append、history_search） |
 | `tools.im` | 飞书发送图片/文件（send_image、send_file），飞书模式下默认启用 |
-| `tools.search` | Serper 网络搜索（serper_search），需 api_key 或 SERPER_API_KEY |
+| `tools.search` | Serper 网络搜索（serper_search），需在 [serper.dev](https://serper.dev/) 注册获取 API key，或设置环境变量 SERPER_API_KEY |
 | `tools.plugins` | 插件目录列表 |
 | `skills.load` | Skill 目录列表（AgentSkills 格式，兼容 OpenClaw），路径相对 simple/ |
 | `skills.mode` | `full`=全量注入 body，`metadata_only`=仅元数据，body 通过 skill_read 按需拉取 |
