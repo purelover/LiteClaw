@@ -1,8 +1,8 @@
-# LiteClaw Simple
+# LiteClaw
 
 Python 精简实现：飞书 IM + 豆包 LLM。参考 OpenClaw 架构设计。
 
-本文档以 **Ubuntu** 为运行环境。
+项目根目录为 `LiteClaw`，主程序在 `simple/` 下。本文档以 **Ubuntu** 为运行环境。
 
 ## 架构（参考 OpenClaw）
 
@@ -64,7 +64,7 @@ Python 精简实现：飞书 IM + 豆包 LLM。参考 OpenClaw 架构设计。
 
 ## 安装
 
-安装 Python 依赖（建议使用虚拟环境）：
+从项目根目录进入 `simple/` 并安装 Python 依赖（建议使用虚拟环境）：
 
 ```bash
 cd simple
@@ -75,7 +75,10 @@ pip install -r requirements.txt
 
 ## 配置
 
+在 `simple/` 目录下：
+
 ```bash
+cd simple
 cp config.example.yaml config.yaml
 # 编辑 config.yaml 填写
 ```
@@ -83,7 +86,7 @@ cp config.example.yaml config.yaml
 | 配置项 | 说明 |
 |--------|------|
 | `gateway.max_concurrent_lanes` | 最大并发 lane 数 |
-| `storage.db_path` | SQLite 数据库路径 |
+| `storage.db_path` | SQLite 数据库路径（相对 simple/） |
 | `exec.enabled` | 是否启用 exec 工具（exec_python/exec_bash） |
 | `exec.timeout_sec` | 代码执行超时（秒） |
 | `tools.file` | 文件工具（read/write/edit/apply_patch），需设 workspace |
@@ -93,7 +96,7 @@ cp config.example.yaml config.yaml
 | `tools.memory` | 工作区记忆（AGENTS/SOUL/USER/MEMORY.md、memory_*、memory_append） |
 | `tools.search` | Serper 网络搜索（serper_search），需 api_key 或 SERPER_API_KEY |
 | `tools.plugins` | 插件目录列表 |
-| `skills.load` | Skill 目录列表（AgentSkills 格式，兼容 OpenClaw） |
+| `skills.load` | Skill 目录列表（AgentSkills 格式，兼容 OpenClaw），路径相对 simple/ |
 | `skills.entries` | 按 name 启用/禁用，如 `example: { enabled: false }` |
 | `doubao` | 豆包 API Key、endpoint_id |
 | `cloud_chain` | 云端模型链，按优先级 |
@@ -128,7 +131,7 @@ cd simple
 git clone --depth 1 https://github.com/LeoYeAI/openclaw-master-skills.git skills-openclaw
 ```
 
-在 `config.yaml` 中增加 load 路径：
+在 `simple/config.yaml` 中增加 load 路径：
 
 ```yaml
 skills:
@@ -137,7 +140,7 @@ skills:
 
 **方式二：从 ClawHub 或社区获取**
 
-- 浏览 [clawhub.com](https://clawhub.com/) 或 [awesome-openclaw-skills-cn](https://github.com/AgentWorkers/awesome-openclaw-skills-cn)
+- 浏览 [clawhub.ai](https://clawhub.ai/) 或 [awesome-openclaw-skills-cn](https://github.com/AgentWorkers/awesome-openclaw-skills-cn)
 - 找到目标 skill 的 `SKILL.md` 或仓库
 - 在 `simple/skills/` 下新建子目录（如 `my-skill/`），放入 `SKILL.md`
 
@@ -169,10 +172,11 @@ description: 简要描述
 
 ## 运行
 
-```bash
-# 若使用虚拟环境，先激活
-source .venv/bin/activate
+在 `simple/` 目录下：
 
+```bash
+cd simple
+source .venv/bin/activate
 python3 main.py
 ```
 
@@ -183,40 +187,43 @@ python3 main.py
 ## 目录结构
 
 ```
-simple/
-├── main.py           # 入口
-├── config.example.yaml
-├── requirements.txt
-├── data/             # SQLite 存储（自动创建）
-├── gateway/          # 控制平面
-│   ├── gateway.py    # Gateway 核心
-│   ├── session.py    # Session 管理
-│   └── queue.py      # Lane 队列
-├── agent/            # Agent 执行平面
-│   └── agent.py      # LLM + 工具调用
-├── storage/          # 存储层
-│   ├── db.py         # SQLite 持久化
-│   └── workspace.py  # 工作区记忆（Markdown）
-├── tools/            # 工具（插件式扩展）
-│   ├── registry.py   # 工具注册表
-│   ├── exec_tool.py  # exec_python/exec_bash
-│   ├── file_tool.py  # file_read/write/edit/apply_patch
-│   ├── browser_tool.py # 无头浏览器
-│   ├── system_tool.py  # process_list/exec_command
-│   ├── automation_tool.py # cron_list/gateway_status
-│   └── memory_tool.py     # memory_get/search/append
-├── data/workspace/   # 工作区（tools.memory 启用时）
-│   ├── AGENTS.md     # 顶层指令
-│   ├── SOUL.md       # 人格与价值观
-│   ├── USER.md       # 用户偏好
-│   ├── MEMORY.md     # 长期记忆
-│   └── memory/       # 每日日志 memory/YYYY-MM-DD.md
-├── plugins/          # 插件目录
-├── skills/           # AgentSkills 格式（兼容 OpenClaw）
-│   ├── loader.py     # Skill 加载器
-│   └── example/     # 示例 skill
-├── llm/              # 大模型
-├── im/
-│   └── feishu.py     # 飞书 Webhook
-└── exec/             # 本地执行（供 tools 调用）
+LiteClaw/
+├── README.md
+├── LICENSE
+└── simple/              # 主程序目录
+    ├── main.py          # 入口
+    ├── config.example.yaml
+    ├── requirements.txt
+    ├── data/            # SQLite 存储（自动创建）
+    ├── gateway/         # 控制平面
+    │   ├── gateway.py   # Gateway 核心
+    │   ├── session.py   # Session 管理
+    │   └── queue.py    # Lane 队列
+    ├── agent/           # Agent 执行平面
+    │   └── agent.py    # LLM + 工具调用
+    ├── storage/         # 存储层
+    │   ├── db.py       # SQLite 持久化
+    │   └── workspace.py # 工作区记忆（Markdown）
+    ├── tools/           # 工具（插件式扩展）
+    │   ├── registry.py
+    │   ├── exec_tool.py
+    │   ├── file_tool.py
+    │   ├── browser_tool.py
+    │   ├── system_tool.py
+    │   ├── automation_tool.py
+    │   └── memory_tool.py
+    ├── data/workspace/  # 工作区（tools.memory 启用时）
+    │   ├── AGENTS.md
+    │   ├── SOUL.md
+    │   ├── USER.md
+    │   ├── MEMORY.md
+    │   └── memory/      # 每日日志 memory/YYYY-MM-DD.md
+    ├── plugins/
+    ├── skills/         # AgentSkills 格式（兼容 OpenClaw）
+    │   ├── loader.py
+    │   └── example/
+    ├── llm/
+    ├── im/
+    │   └── feishu.py
+    └── exec/
 ```
