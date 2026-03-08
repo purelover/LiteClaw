@@ -1,0 +1,11 @@
+# LiteClaw Simple - Python 精简实现
+# 飞书 IM + 豆包 LLM
+
+lark-oapi[flask]>=1.2.0
+openai>=1.0.0
+pyyaml>=6.0
+requests>=2.28.0   # search 工具 Serper API
+
+# 扩展工具（按需安装）
+# playwright>=1.40.0   # browser 工具: pip install playwright && playwright install chromium
+# psutil>=5.9.0        # system 工具 process_list 更完整

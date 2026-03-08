@@ -1,0 +1,222 @@
+# LiteClaw Simple
+
+Python 精简实现：飞书 IM + 豆包 LLM。参考 OpenClaw 架构设计。
+
+本文档以 **Ubuntu** 为运行环境。
+
+## 架构（参考 OpenClaw）
+
+- **Gateway 控制平面**：Session 管理、消息路由、Lane 队列调度
+- **Session**：per-channel-peer 隔离，维护对话历史与状态
+- **Lane 队列**：同 sessionKey 串行，不同 sessionKey 可并行
+- **Agent**：LLM 推理 + 工具调用（exec、file、browser、system、automation、插件）
+- **存储**：SQLite 对话历史 + 工作区 Markdown 记忆（AGENTS/SOUL/USER/MEMORY.md）
+
+## 功能
+
+- **飞书**：接收单聊消息，默认长连接（WebSocket），可选 Webhook；经 Gateway 路由后由 Agent 处理
+- **豆包**：火山引擎 ARK API（OpenAI 兼容），支持 Function Calling
+- **本地+云端协同**：hybrid_loop 启用时，本地模型分析难度/完成度，易用本地 parse，难用云端
+- **工具执行**：exec、file、browser、system、automation、memory、search；hybrid 模式下检测回复中的代码块并执行
+
+## 环境
+
+- Python 3.10+
+- 飞书企业自建应用（App ID、App Secret）
+- 豆包/火山引擎 API Key 和接入点 ID
+
+## 环境依赖（Ubuntu 按需安装）
+
+以下为 Ubuntu 下的安装与启动方法，根据配置按需安装。
+
+### Python
+
+- **用途**：运行主程序
+- **安装**：
+  ```bash
+  sudo apt update
+  sudo apt install python3 python3-pip python3-venv
+  ```
+- **验证**：`python3 --version`（需 3.10+）
+
+### Ollama（本地模型，`hybrid_loop.enabled` 时需安装）
+
+- **用途**：本地大模型，用于难度/完成度分析及简单任务
+- **安装**：`curl -fsSL https://ollama.com/install.sh | sh`
+- **拉取模型**：`ollama pull llama3.2` 或 `ollama pull qwen2.5:0.5b`
+- **验证**：`ollama list` 或访问 http://localhost:11434
+
+### Bash（代码执行，`exec.enabled: true` 时需安装）
+
+- **用途**：执行 LLM 生成的 Bash 脚本（Python 脚本使用当前 Python 解释器）
+- **说明**：Ubuntu 默认已安装 bash，一般无需额外安装
+- **验证**：`bash --version`
+
+### ngrok（本地调试飞书 Webhook 时可选）
+
+- **用途**：将本地端口暴露为公网 URL，供飞书事件订阅回调
+- **安装**：
+  ```bash
+  sudo snap install ngrok
+  # 或从 https://ngrok.com/download 下载对应架构的二进制
+  ```
+- **启动**：`ngrok http 9000`，将生成的 `https://xxx.ngrok.io` 填到飞书事件订阅 URL
+
+## 安装
+
+安装 Python 依赖（建议使用虚拟环境）：
+
+```bash
+cd simple
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+## 配置
+
+```bash
+cp config.example.yaml config.yaml
+# 编辑 config.yaml 填写
+```
+
+| 配置项 | 说明 |
+|--------|------|
+| `gateway.max_concurrent_lanes` | 最大并发 lane 数 |
+| `storage.db_path` | SQLite 数据库路径 |
+| `exec.enabled` | 是否启用 exec 工具（exec_python/exec_bash） |
+| `exec.timeout_sec` | 代码执行超时（秒） |
+| `tools.file` | 文件工具（read/write/edit/apply_patch），需设 workspace |
+| `tools.browser` | 无头浏览器（需 playwright） |
+| `tools.system` | 进程列表、系统命令 |
+| `tools.automation` | cron_list、gateway_status |
+| `tools.memory` | 工作区记忆（AGENTS/SOUL/USER/MEMORY.md、memory_*、memory_append） |
+| `tools.search` | Serper 网络搜索（serper_search），需 api_key 或 SERPER_API_KEY |
+| `tools.plugins` | 插件目录列表 |
+| `skills.load` | Skill 目录列表（AgentSkills 格式，兼容 OpenClaw） |
+| `skills.entries` | 按 name 启用/禁用，如 `example: { enabled: false }` |
+| `doubao` | 豆包 API Key、endpoint_id |
+| `cloud_chain` | 云端模型链，按优先级 |
+| `hybrid_loop.enabled` | 是否启用本地+云端协同（需 Ollama） |
+| `feishu.mode` | `ws`=长连接（默认，无需公网），`webhook`=HTTP 回调 |
+| `feishu.ws_log_level` | ws 模式日志级别，`info` 可过滤 ping/pong，`debug` 输出全部 |
+| `feishu` | app_id、app_secret；webhook 模式需 verification_token、encrypt_key |
+
+## Skills（可选）
+
+LiteClaw 支持 [AgentSkills](https://agentskills.io/) 格式，可复用 OpenClaw 的 skills。每个 skill 是含 `SKILL.md` 的目录：
+
+```yaml
+skills:
+  load: ["skills"]           # 加载 simple/skills/ 下子目录
+  only: []                  # 白名单，仅过滤 openclaw 等后续目录；第一个 load 目录始终全量加载
+  entries: {}               # 按 name 启用/禁用
+  check_requires: true      # 检查 bins/env，缺则跳过
+```
+
+`SKILL.md` 含 YAML frontmatter（name、description）和 Markdown 正文。正文会注入到 system prompt，指导模型何时、如何使用相关能力。
+
+### 安装 OpenClaw Skills
+
+LiteClaw 无 `clawhub` CLI，需手动将 skill 目录放入 load 路径：
+
+**方式一：克隆社区 skills 仓库**
+
+```bash
+cd simple
+# openclaw-master-skills：127+ 精选 skills，含 skills/ 子目录
+git clone --depth 1 https://github.com/LeoYeAI/openclaw-master-skills.git skills-openclaw
+```
+
+在 `config.yaml` 中增加 load 路径：
+
+```yaml
+skills:
+  load: ["skills", "skills-openclaw/skills"]   # skills-openclaw/skills 下每个子目录为一个 skill
+```
+
+**方式二：从 ClawHub 或社区获取**
+
+- 浏览 [clawhub.com](https://clawhub.com/) 或 [awesome-openclaw-skills-cn](https://github.com/AgentWorkers/awesome-openclaw-skills-cn)
+- 找到目标 skill 的 `SKILL.md` 或仓库
+- 在 `simple/skills/` 下新建子目录（如 `my-skill/`），放入 `SKILL.md`
+
+**格式要求**：每个 skill 目录需含 `SKILL.md`，至少包含：
+
+```yaml
+---
+name: skill-name
+description: 简要描述
+---
+```
+
+若 skill 声明 `metadata.openclaw.requires`（如 `bins: ["gh"]`），需在环境中安装对应命令，否则 `check_requires: true` 时会跳过。
+
+## 飞书配置步骤
+
+1. 打开 [飞书开放平台](https://open.feishu.cn/)
+2. 创建企业自建应用，获取 App ID、App Secret
+3. 开通权限：`im:message:send_as_bot`、`im:message:receive_v1`（接收消息）；群聊需额外开通「获取用户在群组中@机器人的消息」
+4. 事件订阅：
+   - **长连接模式**（`feishu.mode: ws`，默认）：选择「使用长连接接收事件」，添加 `im.message.receive_v1`，无需公网 URL
+   - **Webhook 模式**（`feishu.mode: webhook`）：请求 URL 填 `https://你的域名/webhook/event`，本地调试可用 ngrok
+
+## 豆包配置步骤
+
+1. 登录 [火山引擎控制台](https://console.volcengine.com/ark)
+2. 开通豆包模型服务，创建 API Key
+3. 创建推理接入点，获取 `ep-xxx` 格式的 endpoint_id
+
+## 运行
+
+```bash
+# 若使用虚拟环境，先激活
+source .venv/bin/activate
+
+python3 main.py
+```
+
+默认监听 `0.0.0.0:9000`，飞书事件会推送到 `/webhook/event`。
+
+**注意**：长连接模式无需公网 URL；Webhook 模式需公网可访问的 URL，本地调试可用 [ngrok](https://ngrok.com/)。
+
+## 目录结构
+
+```
+simple/
+├── main.py           # 入口
+├── config.example.yaml
+├── requirements.txt
+├── data/             # SQLite 存储（自动创建）
+├── gateway/          # 控制平面
+│   ├── gateway.py    # Gateway 核心
+│   ├── session.py    # Session 管理
+│   └── queue.py      # Lane 队列
+├── agent/            # Agent 执行平面
+│   └── agent.py      # LLM + 工具调用
+├── storage/          # 存储层
+│   ├── db.py         # SQLite 持久化
+│   └── workspace.py  # 工作区记忆（Markdown）
+├── tools/            # 工具（插件式扩展）
+│   ├── registry.py   # 工具注册表
+│   ├── exec_tool.py  # exec_python/exec_bash
+│   ├── file_tool.py  # file_read/write/edit/apply_patch
+│   ├── browser_tool.py # 无头浏览器
+│   ├── system_tool.py  # process_list/exec_command
+│   ├── automation_tool.py # cron_list/gateway_status
+│   └── memory_tool.py     # memory_get/search/append
+├── data/workspace/   # 工作区（tools.memory 启用时）
+│   ├── AGENTS.md     # 顶层指令
+│   ├── SOUL.md       # 人格与价值观
+│   ├── USER.md       # 用户偏好
+│   ├── MEMORY.md     # 长期记忆
+│   └── memory/       # 每日日志 memory/YYYY-MM-DD.md
+├── plugins/          # 插件目录
+├── skills/           # AgentSkills 格式（兼容 OpenClaw）
+│   ├── loader.py     # Skill 加载器
+│   └── example/     # 示例 skill
+├── llm/              # 大模型
+├── im/
+│   └── feishu.py     # 飞书 Webhook
+└── exec/             # 本地执行（供 tools 调用）
+```

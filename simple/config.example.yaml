@@ -1,0 +1,97 @@
+# LiteClaw Simple 配置示例
+# 复制为 config.yaml 并填写实际配置：cp config.example.yaml config.yaml
+
+# Gateway（控制平面）
+gateway:
+  max_concurrent_lanes: 10
+
+# Agent
+agent:
+  max_tool_rounds: 10  # 单次对话最大工具调用轮数，超则返回「工具调用轮次过多」
+
+# 存储（SQLite）
+storage:
+  db_path: "data/liteclaw.db"
+
+# Context 压缩与 memory flush（对齐 OpenClaw）
+compaction:
+  enabled: true
+  context_window: 32000      # 触发压缩的 context 上限
+  max_context_tokens: 32000  # 实际发送上限（如云端 32k），超则截断
+  reserve_tokens: 4000       # 预留空间
+  target_after_compaction: 10000  # 压缩后目标 token 数，留足余量
+  keep_recent_tokens: 6000   # 压缩时保留最近 token 数
+  summary_max_tokens: 1500   # 历史摘要上限
+  keep_recent_tokens: 8000   # 压缩时保留最近 token 数
+  memory_flush:
+    enabled: true
+    soft_threshold_tokens: 2000   # 接近压缩前 N token 时触发 flush
+    prompt: "Call memory_append tool (path+content). Extract key facts. Use memory/YYYY-MM-DD.md or MEMORY.md. NO_REPLY only if nothing to store. Do not output plain text."
+
+# 工具执行
+exec:
+  enabled: true
+  timeout_sec: 30
+
+# 扩展工具（与 OpenClaw 能力对齐）
+tools:
+  file:
+    enabled: false
+    workspace: "data/workspace"  # 文件操作限制在此目录内
+  browser:
+    enabled: false
+    timeout_sec: 30  # 需: pip install playwright && playwright install chromium
+  system:
+    enabled: false   # 进程列表、系统命令
+  automation:
+    enabled: false   # cron_list、gateway_status
+  memory:            # 工作区记忆（对齐 OpenClaw）
+    enabled: false
+    workspace: "data/workspace"  # AGENTS.md、SOUL.md、USER.md、MEMORY.md、memory/
+  im:                # 发送图片/文件给用户（飞书），send_image、send_file
+    enabled: true    # 飞书模式下默认启用
+  search:            # Serper 网络搜索，API: https://serper.dev
+    enabled: false
+    api_key: ""      # 或设置环境变量 SERPER_API_KEY
+  plugins: []        # 插件目录列表，如 ["plugins"]
+
+# Skills（AgentSkills 格式，兼容 OpenClaw）
+skills:
+  load: []  # 如 ["skills", "skills-openclaw/skills"]
+  mode: full  # full=全量注入 | metadata_only=仅元数据，body 通过 skill_read 按需拉取
+  only: []  # 白名单，仅过滤 openclaw 等后续目录；空表示全部加白；第一个 load 目录始终全量加载
+  entries: {}  # 如 example: { enabled: false } 禁用某 skill
+  check_requires: true  # 是否检查 metadata.openclaw.requires（bins/env），缺则跳过
+
+# 本地大模型（Ollama）
+local:
+  enabled: true
+  model: "llama3.2"
+  base_url: "http://localhost:11434/v1"
+  enable_thinking: false  # 关闭 thinking 以提速（Qwen/DeepSeek 等支持 thinking 的模型）
+
+# 豆包大模型（火山引擎 ARK）- 作为云端模型
+doubao:
+  api_key: "your-ark-api-key"
+  endpoint_id: "ep-xxxxxxxxxx"  # 接入点 ID
+
+# 云端模型链（按优先级）
+cloud_chain:
+  - "ep-xxxxxxxxxx"
+
+# 本地+云端协同（hybrid_loop 启用时：默认本地 parse，fail 则 fallback 云端）
+hybrid_loop:
+  enabled: true
+  # 调用工具时无需 STATUS；仅文本回复时须在末尾注明 [STATUS:success/fail]
+  status_instruction: |
+    【重要】完成度规则：若你调用工具则无需标注；若仅回复文本，须在末尾注明 [STATUS:success] 或 [STATUS:fail]。
+
+# 飞书机器人（需在飞书开放平台创建企业自建应用）
+feishu:
+  mode: "ws"  # ws=长连接(WebSocket，无需公网URL)，webhook=HTTP回调(需公网URL)
+  app_id: "your-app-id"
+  app_secret: "your-app-secret"
+  # 长连接模式下无需配置以下两项；webhook 模式下需配置
+  verification_token: ""
+  encrypt_key: ""
+  port: 9000

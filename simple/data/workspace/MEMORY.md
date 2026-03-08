@@ -1,0 +1,15 @@
+# 长期记忆
+
+在此记录重要事实、决策、经验教训。
+- 用户说「记住这个」时，将内容写入此处
+- 持久性偏好、重要约定
+- 压缩对话时，将关键信息提炼后写入
+
+
+## 📸 截图发送流程总结记忆（2026 Q1）
+
+### ✅ 成功执行的经验
+1. **browser_screenshot工具可用**：支持访问百度、新华网等国内网站，但Google可能存在反爬虫限制
+2. **文件大小规律**：百度页通常79-86KB，全屏截约145KB，需设置full_page=True参数
+3. **文件路径固定**：工作区为`/home/jarod/Develop/LiteClaw/simple/data/workspace/`
+4. **send_image、send_file工具可用**：截图用 send_image；pdf、doc 等文件用 send_file（≤30M）
