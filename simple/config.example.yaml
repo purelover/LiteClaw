@@ -7,7 +7,7 @@ gateway:
 
 # Agent
 agent:
-  max_tool_rounds: 10  # 单次对话最大工具调用轮数，超则返回「工具调用轮次过多」
+  max_tool_rounds: 20  # 单次对话最大工具调用轮数，超则返回「工具调用轮次过多」
 
 # 存储（SQLite）
 storage:
@@ -36,17 +36,17 @@ exec:
 # 扩展工具（与 OpenClaw 能力对齐）
 tools:
   file:
-    enabled: false
+    enabled: true
     workspace: "data/workspace"  # 文件操作限制在此目录内
   browser:
-    enabled: false
+    enabled: true
     timeout_sec: 30  # 需: pip install playwright && playwright install chromium
   system:
-    enabled: false   # 进程列表、系统命令
+    enabled: true   # 进程列表、系统命令
   automation:
-    enabled: false   # cron_list、gateway_status
+    enabled: true   # cron_list、gateway_status
   memory:            # 工作区记忆（对齐 OpenClaw）
-    enabled: false
+    enabled: true
     workspace: "data/workspace"  # AGENTS.md、SOUL.md、USER.md、MEMORY.md、memory/
   im:                # 发送图片/文件给用户（飞书），send_image、send_file
     enabled: true    # 飞书模式下默认启用
@@ -58,7 +58,7 @@ tools:
 # Skills（AgentSkills 格式，兼容 OpenClaw）
 skills:
   load: []  # 如 ["skills", "skills-openclaw/skills"]
-  mode: full  # full=全量注入 | metadata_only=仅元数据，body 通过 skill_read 按需拉取
+  mode: metadata_only  # full=全量注入 | metadata_only=仅元数据，body 通过 skill_read 按需拉取
   only: []  # 白名单，仅过滤 openclaw 等后续目录；空表示全部加白；第一个 load 目录始终全量加载
   entries: {}  # 如 example: { enabled: false } 禁用某 skill
   check_requires: true  # 是否检查 metadata.openclaw.requires（bins/env），缺则跳过
