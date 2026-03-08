@@ -9,15 +9,15 @@ Python 精简实现：飞书 IM + 豆包 LLM。参考 OpenClaw 架构设计。
 - **Gateway 控制平面**：Session 管理、消息路由、Lane 队列调度
 - **Session**：per-channel-peer 隔离，维护对话历史与状态
 - **Lane 队列**：同 sessionKey 串行，不同 sessionKey 可并行
-- **Agent**：LLM 推理 + 工具调用（exec、file、browser、system、automation、插件）
+- **Agent**：LLM 推理 + 工具调用（exec、file、browser、system、automation、memory、search、im、插件）
 - **存储**：SQLite 对话历史 + 工作区 Markdown 记忆（AGENTS/SOUL/USER/MEMORY.md）
 
 ## 功能
 
 - **飞书**：接收单聊消息，默认长连接（WebSocket），可选 Webhook；经 Gateway 路由后由 Agent 处理
 - **豆包**：火山引擎 ARK API（OpenAI 兼容），支持 Function Calling
-- **本地+云端协同**：hybrid_loop 启用时，本地模型分析难度/完成度，易用本地 parse，难用云端
-- **工具执行**：exec、file、browser、system、automation、memory、search；hybrid 模式下检测回复中的代码块并执行
+- **本地+云端协同**：hybrid_loop 启用时，默认先用本地模型；若本地执行结果不理想，自动 fallback 到云端
+- **工具执行**：exec、file、browser、system、automation、memory、search、im（send_image/send_file）；代码通过 exec_python/exec_bash 工具调用执行，支持从文本解析 tool_call JSON
 
 ## 环境
 
@@ -41,7 +41,7 @@ Python 精简实现：飞书 IM + 豆包 LLM。参考 OpenClaw 架构设计。
 
 ### Ollama（本地模型，`hybrid_loop.enabled` 时需安装）
 
-- **用途**：本地大模型，用于难度/完成度分析及简单任务
+- **用途**：本地大模型，hybrid 模式下承担主推理流程，或用于简单任务
 - **安装**：`curl -fsSL https://ollama.com/install.sh | sh`
 - **拉取模型**：`ollama pull llama3.2` 或 `ollama pull qwen2.5:0.5b`
 - **验证**：`ollama list` 或访问 http://localhost:11434
@@ -108,11 +108,15 @@ cp config.example.yaml config.yaml
 | `tools.browser` | 无头浏览器（需 playwright） |
 | `tools.system` | 进程列表、系统命令 |
 | `tools.automation` | cron_list、gateway_status |
-| `tools.memory` | 工作区记忆（AGENTS/SOUL/USER/MEMORY.md、memory_*、memory_append） |
+| `tools.memory` | 工作区记忆（memory_get/search/append、history_search） |
+| `tools.im` | 飞书发送图片/文件（send_image、send_file），飞书模式下默认启用 |
 | `tools.search` | Serper 网络搜索（serper_search），需 api_key 或 SERPER_API_KEY |
 | `tools.plugins` | 插件目录列表 |
 | `skills.load` | Skill 目录列表（AgentSkills 格式，兼容 OpenClaw），路径相对 simple/ |
+| `skills.mode` | `full`=全量注入 body，`metadata_only`=仅元数据，body 通过 skill_read 按需拉取 |
+| `skills.only` | 白名单，仅过滤 openclaw 等后续目录；空表示全部加白 |
 | `skills.entries` | 按 name 启用/禁用，如 `example: { enabled: false }` |
+| `skills.check_requires` | 是否检查 bins/env，缺则跳过 |
 | `doubao` | 豆包 API Key、endpoint_id |
 | `cloud_chain` | 云端模型链，按优先级 |
 | `hybrid_loop.enabled` | 是否启用本地+云端协同（需 Ollama） |
