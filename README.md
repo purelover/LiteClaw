@@ -1,6 +1,6 @@
 # LiteClaw
 
-Python 精简实现：飞书 IM + 豆包 LLM。参考 OpenClaw 架构设计。
+Python 精简实现：飞书 IM + 豆包 LLM。参考 OpenClaw 架构设计，核心区别在于本地+云端协同：优先用本地大模型处理任务，结果不理想时自动 fallback 到云端；云端可配置多模型链，依次 fallback。作者实测可降低云端 token 消耗约 **95%**。
 
 > **用 [Cursor](https://cursor.com/) vibe 编程实现**
 
