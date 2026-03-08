@@ -2,6 +2,8 @@
 
 Python 精简实现：飞书 IM + 豆包 LLM。参考 OpenClaw 架构设计。
 
+> **用 [Cursor](https://cursor.com/) vibe 编程实现**
+
 项目根目录为 `LiteClaw`，主程序在 `simple/` 下。本文档以 **Ubuntu** 为运行环境。
 
 ## 架构（参考 OpenClaw）
