@@ -46,6 +46,21 @@ Python 精简实现：飞书 IM + 豆包 LLM。参考 OpenClaw 架构设计。
 - **拉取模型**：`ollama pull llama3.2` 或 `ollama pull qwen2.5:0.5b`
 - **验证**：`ollama list` 或访问 http://localhost:11434
 
+**示例：8G 显存 PC 运行 qwen3.5:4b**
+
+在 8G 显存的 PC 上，可通过量化 KV cache 将 qwen3.5:4b 全部载入显存，实现流畅推理：
+
+1. 设置环境变量：`export OLLAMA_KV_CACHE_TYPE=q8_0`
+2. 创建 Modelfile（如 `Modelfile`）：
+   ```
+   FROM qwen3.5:4b
+   PARAMETER num_ctx 32768
+   ```
+3. 创建模型：`ollama create qwen3.5-4b-32k -f Modelfile`
+4. 在 `config.yaml` 的 `local.model` 中填写 `qwen3.5-4b-32k`
+
+效果：显存占用约 6.7GB，输出约 30+ tokens/s，可流畅使用。
+
 ### Bash（代码执行，`exec.enabled: true` 时需安装）
 
 - **用途**：执行 LLM 生成的 Bash 脚本（Python 脚本使用当前 Python 解释器）

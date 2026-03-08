@@ -11,5 +11,5 @@
 ### ✅ 成功执行的经验
 1. **browser_screenshot工具可用**：支持访问百度、新华网等国内网站，但Google可能存在反爬虫限制
 2. **文件大小规律**：百度页通常79-86KB，全屏截约145KB，需设置full_page=True参数
-3. **文件路径固定**：工作区为`/home/jarod/Develop/LiteClaw/simple/data/workspace/`
+3. **文件路径固定**：工作区为 `data/workspace/`（相对 simple 目录）
 4. **send_image、send_file工具可用**：截图用 send_image；pdf、doc 等文件用 send_file（≤30M）

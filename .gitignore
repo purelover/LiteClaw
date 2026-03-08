@@ -1,6 +1,12 @@
 # 配置（含敏感信息）
 config.yaml
 
+# OpenClaw skills（从 ClawHub 拉取，本地不纳入版本控制）
+simple/skills-openclaw/
+
+# 文档（内部设计/对比笔记）
+simple/docs/
+
 # Python
 __pycache__/
 *.py[cod]
