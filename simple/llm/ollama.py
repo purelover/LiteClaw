@@ -21,18 +21,19 @@ def chat(
     messages: list[dict],
     stream: bool = False,
     enable_thinking: bool = False,
+    temperature: float | None = None,
 ) -> str:
     """调用本地模型对话。enable_thinking=False 关闭 thinking 以提速（Qwen/DeepSeek 等）"""
     extra = {"stream": stream}  # 默认 False，确保结果合并返回
     if not enable_thinking:
         extra["think"] = False
+    kwargs = {"model": model, "messages": messages, "stream": stream}
+    if temperature is not None:
+        kwargs["temperature"] = temperature
+    if extra:
+        kwargs["extra_body"] = extra
     try:
-        resp = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            stream=stream,
-            **({"extra_body": extra} if extra else {}),
-        )
+        resp = client.chat.completions.create(**kwargs)
     except Exception as e:
         log("ollama", "chat 请求失败: %s", type(e).__name__)
         log("ollama", "错误详情: %s", e)

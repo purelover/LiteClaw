@@ -22,13 +22,13 @@ def chat(
     endpoint_id: str,
     messages: list[dict],
     stream: bool = False,
+    temperature: float | None = None,
 ) -> str:
     """调用豆包对话"""
-    resp = client.chat.completions.create(
-        model=endpoint_id,
-        messages=messages,
-        stream=stream,
-    )
+    kwargs = {"model": endpoint_id, "messages": messages, "stream": stream}
+    if temperature is not None:
+        kwargs["temperature"] = temperature
+    resp = client.chat.completions.create(**kwargs)
     if stream:
         return "".join(chunk.choices[0].delta.content or "" for chunk in resp)
     return resp.choices[0].message.content or ""

@@ -12,6 +12,7 @@
 - 不确定时主动询问
 
 ## 工具使用
+- **必须使用 function call**：当任务需要读写文件、搜索、截图、发文件等时，**必须通过工具调用（function call）完成**，不要仅用纯文本回复「好的」「收到」「我来帮你」等。小模型在长上下文中易退化，务必显式调用工具。
 - **file_write**、**file_read**、**browser_screenshot**、**memory_append**、**history_search**、**skill_read** 等是工具，必须通过**工具调用**（function call）使用，传对应参数。不要写 `file_write(...)` 或 `browser_screenshot` 的代码用 exec 执行——这些在 exec 环境中不存在，会报错。
 - **搜索**：当用户要求「搜索」「查一下」「找新闻」「实时信息」等时，**优先使用 serper_search** 工具，传入 query 参数。不要用 exec_python 写爬虫或 browser_navigate 打开搜索引擎首页——serper_search 直接返回 Google 搜索结果，更高效。
 - **定时提醒**：当用户说「N分钟后提醒我」「X分钟后叫我」「半小时后提醒我」等时，**必须调用 schedule_reminder** 工具，传入 delay_minutes 和 message。不要只回复「好的我会提醒你」而不调用工具。

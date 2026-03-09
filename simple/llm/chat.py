@@ -15,16 +15,20 @@ def chat_with_tools(
     messages: list[dict],
     tools: list[dict] | None = None,
     extra_body: dict | None = None,
+    temperature: float | None = None,
 ) -> dict:
     """
     调用 LLM，支持工具。
     返回 {"content": str, "tool_calls": list}，tool_calls 可能为空。
     extra_body: 透传给 create（如 Ollama 的 think=False）
+    temperature: 任务执行建议 0.1~0.3，不设则用模型默认
     """
     kwargs = {"model": model, "messages": messages}
     if tools:
         kwargs["tools"] = tools
         kwargs["tool_choice"] = "auto"
+    if temperature is not None:
+        kwargs["temperature"] = temperature
     if extra_body:
         kwargs["extra_body"] = extra_body
 
