@@ -24,6 +24,8 @@ from storage.workspace import (
     load_workspace_prompt,
     build_memory_context,
     load_recitation_context,
+    load_memory_for_flush,
+    memory_append,
 )
 from skills.loader import build_skills_prompt
 from tools.registry import get_definitions, get_executors
@@ -31,8 +33,8 @@ from llm.compaction import (
     should_flush,
     should_compact,
     is_no_reply,
-    MEMORY_FLUSH_PROMPT,
-    COMPACTION_SUMMARY_PROMPT,
+    COMPACTION_CHUNK_PROMPT,
+    MEMORY_FLUSH_FROM_SUMMARY_PROMPT,
 )
 
 
@@ -217,98 +219,31 @@ class Agent:
             log("agent", "tool %s: 执行异常, error=%s", name, e)
             return f"[错误] 执行失败: {e}"
 
-    def _run_memory_flush(self, session) -> None:
-        """Pre-compaction memory flush：静默一轮让模型写入记忆"""
-        mf = self.compaction_cfg.get("memory_flush", {}) or {}
-        prompt = mf.get("prompt") or MEMORY_FLUSH_PROMPT
-        system = self._build_system_prompt(
-            compaction_summary=session.context.get("compaction_summary")
-        )
-        messages = [
-            {"role": "system", "content": system + "\n\n" + prompt},
-            *[{"role": h["role"], "content": h["content"]} for h in (session.conversation_history or [])],
-            {"role": "user", "content": prompt},
-        ]
-        # 截断至窗口内，避免含 base64 图片等大体积内容时发送 2M+ tokens
-        max_ctx = self.compaction_cfg.get("max_context_tokens") or self.compaction_cfg.get("context_window")
-        if max_ctx:
-            reserve = self.compaction_cfg.get("reserve_tokens", 4000)
-            tools = get_definitions() if self.tools_enabled else None
-            tools_tokens = estimate_tools_tokens(tools) if tools else 0
-            max_for_msgs = max_ctx - reserve - tools_tokens
-            if estimate_messages_tokens(messages) > max_for_msgs:
-                compaction_summary = session.context.get("compaction_summary")
-                sys_fn = self._make_system_truncate_fn(compaction_summary, suffix=prompt)
-                messages = truncate_messages_to_fit(
-                    messages, max_for_msgs, system_truncate_fn=sys_fn
-                )
-                log("agent", "memory_flush 截断至 %d 条 (max=%d)", len(messages), max_ctx)
-        tools = get_definitions() if self.tools_enabled else None
-        max_rounds = 5
-        for _ in range(max_rounds):
-            # 每轮前再次截断（tool 结果可能很大）
-            if max_ctx and estimate_messages_tokens(messages) > max_for_msgs:
-                compaction_summary = session.context.get("compaction_summary")
-                sys_fn = self._make_system_truncate_fn(compaction_summary)
-                messages = truncate_messages_to_fit(
-                    messages, max_for_msgs, system_truncate_fn=sys_fn
-                )
-            resp = self.chat_fn(messages, tools)
-            content = (resp.get("content") or "").strip()
-            tool_calls = resp.get("tool_calls") or []
-            if not tool_calls:
-                if is_no_reply(content):
-                    log("agent", "memory_flush 模型返回 NO_REPLY，未写入记忆")
-                else:
-                    # Fallback：模型返回文本但未调用工具时，将内容作为当日摘要写入
-                    if len(content) > 50 and self.workspace_path:
-                        try:
-                            from datetime import datetime
-                            from storage.workspace import memory_append
-                            path = f"memory/{datetime.now().strftime('%Y-%m-%d')}.md"
-                            memory_append(path, f"[memory_flush 摘要]\n{content}", workspace=self.workspace_path)
-                            log("agent", "memory_flush fallback: 已将模型回复(%d字)写入 %s", len(content), path)
-                        except Exception as e:
-                            log("agent", "memory_flush fallback 写入失败: %s", e)
-                    else:
-                        log("agent", "memory_flush 模型有回复(非 NO_REPLY)但无 tool_calls，已忽略")
-                # 标记本周期已 flush，避免重复
-                session.context["memory_flush_compaction_count"] = session.context.get(
-                    "compaction_count", 0
-                )
-                get_storage().save_session(session)
-                return
-            messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
-            for tc in tool_calls:
-                fn = tc.get("function", {})
-                result = self._run_tool(fn.get("name", ""), fn.get("arguments", "{}"))
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.get("id", ""),
-                    "content": result,
-                })
-        log("agent", "memory_flush 完成(工具轮次达上限)")
-
-    def _run_compaction(self, session) -> None:
-        """压缩历史：将旧消息摘要后保留最近部分，压缩后总 token 控制在 target 以内"""
+    def _run_compaction_and_flush(self, session) -> None:
+        """
+        统一 compaction + memory flush：共享同一份增量压缩结果。
+        1. 增量 compaction：按 chunk 压缩，每次输入 chunk + summary，输出新 summary（≤summary_max）
+        2. compaction 结果直接存 session.context
+        3. memory flush：摘要 + 当日 memory/ + MEMORY.md 单次 LLM 调用，追加到 memory 文件（不重复已有内容）
+        """
         cfg = self.compaction_cfg
         ctx_window = cfg.get("context_window", 32000)
         reserve = cfg.get("reserve_tokens", 4000)
         keep_recent = cfg.get("keep_recent_tokens", 6000)
         target = cfg.get("target_after_compaction", 10000)
         summary_max = cfg.get("summary_max_tokens", 1500)
+        chunk_size = cfg.get("chunk_size_tokens", 4000)
+        mf = cfg.get("memory_flush", {}) or {}
+        mf_enabled = mf.get("enabled", False)
 
         history = list(session.conversation_history or [])
         if len(history) < 4:
             return
 
-        # 估算 system 基础大小（不含 compaction_summary）
         base_system = self._build_system_prompt(compaction_summary=None)
         base_tokens = estimate_tokens(base_system)
-        # keep_recent 受 target 约束：target = base + summary + recent + reserve
         keep_recent = min(keep_recent, max(2000, target - reserve - base_tokens - summary_max))
 
-        # 从末尾取 keep_recent_tokens 内的消息
         recent: list[dict] = []
         tokens = 0
         for m in reversed(history):
@@ -322,40 +257,115 @@ class Agent:
         if not old:
             return
 
-        # 摘要旧消息；含错误信息的消息保留更多内容，便于模型自我修正（Manus: keep the wrong stuff in）
         def _history_snippet(m: dict, default_len: int = 500) -> str:
             content = (m.get("content") or "") if isinstance(m.get("content"), str) else str(m.get("content") or "")
             is_error = "[错误]" in content or "执行失败" in content or "Error" in content or "error" in content
             limit = 800 if is_error else default_len
             return f"{m.get('role','')}: {content[:limit]}" + ("..." if len(content) > limit else "")
 
-        history_text = "\n".join(_history_snippet(m) for m in old)
-        summary_prompt = COMPACTION_SUMMARY_PROMPT.format(history=history_text)
-        summary_messages = [
-            {"role": "system", "content": "你是一个对话摘要助手，只输出摘要，不要其他内容。"},
-            {"role": "user", "content": summary_prompt},
-        ]
-        try:
-            resp = self.chat_fn(summary_messages, None)
-            summary = (resp.get("content") or "").strip()[:500]
-        except Exception as e:
-            log("agent", "compaction 摘要失败: %s", e)
-            summary = "[摘要生成失败，已截断旧消息]"
+        # 按 chunk 切分（不跨消息）
+        chunks: list[list[dict]] = []
+        cur: list[dict] = []
+        cur_tokens = 0
+        for m in old:
+            t = estimate_message_tokens(m)
+            if cur_tokens + t > chunk_size and cur:
+                chunks.append(cur)
+                cur = []
+                cur_tokens = 0
+            cur.append(m)
+            cur_tokens += t
+        if cur:
+            chunks.append(cur)
 
+        # 增量压缩：summary = compress(chunk + summary)，每步输出 ≤ summary_max
+        summary = ""
         prev_summary = session.context.get("compaction_summary", "")
+        for i, chunk in enumerate(chunks):
+            chunk_text = "\n".join(_history_snippet(m) for m in chunk)
+            prompt = COMPACTION_CHUNK_PROMPT.format(chunk=chunk_text, prev_summary=summary or "(无)")
+            summary_messages = [
+                {"role": "system", "content": "你是一个对话摘要助手，只输出摘要，不要其他内容。"},
+                {"role": "user", "content": prompt},
+            ]
+            try:
+                resp = self.chat_fn(summary_messages, None)
+                summary = (resp.get("content") or "").strip()[:500]
+            except Exception as e:
+                log("agent", "compaction chunk[%d] 摘要失败: %s", i, e)
+                summary = (summary or "") + "\n[本块摘要失败]"
+            if estimate_tokens(summary) > summary_max:
+                summary = summary[: summary_max * 2] + "\n[... 已截断]"
+        log("agent", "compaction 增量完成: %d chunks, 保留 %d 条", len(chunks), len(recent))
+
         new_summary = (prev_summary + "\n" + summary).strip() if prev_summary else summary
-        # 限制摘要总长度，防止无限增长
         if estimate_tokens(new_summary) > summary_max:
             new_summary = new_summary[: summary_max * 2] + "\n[... 更早摘要已截断]"
 
         compaction_count = session.context.get("compaction_count", 0) + 1
-
         session.conversation_history = recent
         session.context["compaction_summary"] = new_summary
         session.context["compaction_count"] = compaction_count
         get_storage().save_session(session)
         total_est = base_tokens + estimate_tokens(new_summary) + sum(estimate_message_tokens(m) for m in recent)
         log("agent", "compaction 完成: 保留 %d 条, 约 %d tokens, compaction_count=%d", len(recent), total_est, compaction_count)
+
+        # memory flush：基于 summary + 现有 memory，单次 LLM 调用追加
+        if not mf_enabled or not self.workspace_path:
+            return
+        last_flush = session.context.get("memory_flush_compaction_count", -1)
+        if last_flush >= compaction_count:
+            return
+
+        existing_memory = load_memory_for_flush(self.workspace_path)
+        flush_content = f"""## 对话摘要（待写入记忆）
+
+{new_summary}
+
+---
+
+## 现有记忆（请勿重复追加）
+
+{existing_memory}
+
+---
+
+{MEMORY_FLUSH_FROM_SUMMARY_PROMPT}"""
+
+        tools = get_definitions() if self.tools_enabled else None
+        messages = [
+            {"role": "system", "content": "你负责将对话摘要中有价值的内容追加到记忆文件。仅追加摘要中有且现有记忆中未包含的内容。严禁重复。"},
+            {"role": "user", "content": flush_content},
+        ]
+        try:
+            resp = self.chat_fn(messages, tools)
+            content = (resp.get("content") or "").strip()
+            tool_calls = resp.get("tool_calls") or []
+            if not tool_calls:
+                if is_no_reply(content):
+                    log("agent", "memory_flush 模型返回 NO_REPLY，未写入记忆")
+                elif len(content) > 50:
+                    path = f"memory/{datetime.now().strftime('%Y-%m-%d')}.md"
+                    memory_append(path, f"[memory_flush 摘要]\n{content}", workspace=self.workspace_path)
+                    log("agent", "memory_flush fallback: 已将模型回复(%d字)写入 %s", len(content), path)
+                session.context["memory_flush_compaction_count"] = compaction_count
+                get_storage().save_session(session)
+                return
+            for tc in tool_calls:
+                fn = tc.get("function", {})
+                name = fn.get("name", "")
+                args_str = fn.get("arguments", "{}")
+                try:
+                    args = json.loads(args_str) if isinstance(args_str, str) else args_str
+                except json.JSONDecodeError:
+                    args = {}
+                if name == "memory_append":
+                    result = self._run_tool(name, args)
+                    log("agent", "memory_flush memory_append: %s", result)
+            session.context["memory_flush_compaction_count"] = compaction_count
+            get_storage().save_session(session)
+        except Exception as e:
+            log("agent", "memory_flush 失败: %s", e)
 
     def _build_user_content(self, message) -> str | list:
         """将 message 转为 LLM 可用的 content。支持 str 或 dict {"text", "images"}"""
@@ -375,7 +385,11 @@ class Agent:
         return str(message)
 
     def _update_tool_failure_state(self, name: str, result: str) -> None:
-        """根据工具执行结果更新 tool_failure_state，用于 hybrid fallback"""
+        """
+        根据工具执行结果更新 tool_failure_state，用于 hybrid 链式 fallback。
+        本地 -> cloud[0] -> cloud[1] -> ... -> cloud[last]，每个模型单独累计失败条件。
+        cloud_index: -1=本地, 0=cloud[0], 1=cloud[1], ...
+        """
         if self.tool_failure_state is None:
             return
         state = get_tool_failure_state()
@@ -383,16 +397,20 @@ class Agent:
         if is_fail:
             state["consecutive_failures"] = state.get("consecutive_failures", 0) + 1
             if name in ("exec_python", "exec_command"):
-                state["exec_failed"] = True  # 常执行 Python，1 次失败即触发 fallback
+                state["exec_failed"] = True  # exec_python 失败 1 次即触发 fallback
             if state.get("exec_failed") or state.get("consecutive_failures", 0) >= 2:
-                state["use_cloud"] = True
-                log("agent", "tool_failure_state: 触发 fallback (exec_failed=%s, consecutive=%d)",
-                    state.get("exec_failed"), state.get("consecutive_failures", 0))
+                # 推进到下一级：本地(-1)->cloud[0](0)->cloud[1](1)->...
+                prev = state.get("cloud_index", -1)
+                state["cloud_index"] = 0 if prev < 0 else prev + 1
+                state["consecutive_failures"] = 0
+                state.pop("exec_failed", None)
+                log("agent", "tool_failure_state: 触发 fallback -> cloud_index=%d",
+                    state["cloud_index"])
         else:
-            # 工具成功时重置 fallback 状态，下一轮可再尝试本地
+            # 工具成功时解除 fallback，下一轮可再走本地
             state["consecutive_failures"] = 0
             state.pop("exec_failed", None)
-            state.pop("use_cloud", None)
+            state.pop("cloud_index", None)
 
     def run(self, session, message) -> str:
         """处理用户消息，返回回复文本。message 可为 str 或 dict {"text", "images"}"""
@@ -437,29 +455,16 @@ class Agent:
             compaction_count = session.context.get("compaction_count", 0)
             last_flush = session.context.get("memory_flush_compaction_count", -1)
 
-            # 用户发来新的实质性请求时，优先处理请求，推迟 memory_flush 避免目标丢失
+            # 统一 compaction + memory flush：共享增量压缩结果，只做一次
             uc_len = len(str(user_content or ""))
             defer_flush = uc_len > 50 and mf_enabled
-            if should_flush(
+            need_flush = should_flush(
                 context_tokens, ctx_window, reserve, soft, last_flush, compaction_count
-            ) and mf_enabled and not defer_flush:
-                log("agent", "memory_flush 触发 (context_tokens≈%d)", context_tokens)
-                self._run_memory_flush(session)
-                history = list(session.conversation_history or [])
-                compaction_summary = session.context.get("compaction_summary")
-                task_rem = self._get_current_task_reminder(history, user_content)
-                system = self._build_system_prompt(
-                    compaction_summary=compaction_summary,
-                    current_task_reminder=task_rem,
-                )
-                messages = [{"role": "system", "content": system}]
-                for h in history:
-                    messages.append({"role": h["role"], "content": h["content"]})
-                messages.append({"role": "user", "content": user_content})
-
-            if should_compact(context_tokens, ctx_window, reserve):
-                log("agent", "compaction 触发 (context_tokens≈%d)", context_tokens)
-                self._run_compaction(session)
+            ) and mf_enabled and not defer_flush
+            need_compact = should_compact(context_tokens, ctx_window, reserve)
+            if need_compact or need_flush:
+                log("agent", "compaction+flush 触发 (context_tokens≈%d)", context_tokens)
+                self._run_compaction_and_flush(session)
                 history = list(session.conversation_history or [])
                 compaction_summary = session.context.get("compaction_summary")
                 task_rem = self._get_current_task_reminder(history, user_content)

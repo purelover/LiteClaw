@@ -1,22 +1,38 @@
 """
-Context 压缩与 pre-compaction memory flush
-对齐 OpenClaw 的 compaction 与 memoryFlush
+Context 压缩与 memory flush（共享 compaction 结果）
+- 增量 compaction：按 chunk 压缩，避免 O(n²) attention
+- memory flush：基于 compaction 摘要 + 现有 memory 文件，单次 LLM 调用追加
 """
 from util.log import log
 
 
 NO_REPLY = "NO_REPLY"
 
-MEMORY_FLUSH_SYSTEM = "Session nearing compaction. Store durable memories now. You MUST respond with a tool call to memory_append (path + content), not plain text. Write to memory/YYYY-MM-DD.md for daily notes, MEMORY.md for long-term facts, TODO.md for task lists, or NOTES.md for structured notes."
-MEMORY_FLUSH_PROMPT = "Call memory_append tool with path and content. Extract key facts, preferences, task progress, or a brief summary. Use memory/YYYY-MM-DD.md (today), MEMORY.md, TODO.md, or NOTES.md. Reply with NO_REPLY only if there is truly nothing worth storing. Do not output plain text—only a tool call or NO_REPLY."
+# 增量 compaction：每 chunk 输入为「本块内容 + 当前摘要」，输出为新摘要（≤summary_max）
+COMPACTION_CHUNK_PROMPT = """请将以下「本块对话」与「当前摘要」合并为一段简洁摘要（200字以内），保留：关键决策、用户偏好、未完成事项、重要事实、失败/错误信息。只输出摘要，不要其他内容。
 
-COMPACTION_SUMMARY_PROMPT = """请将以下对话历史压缩为一段简洁摘要（200字以内），保留：关键决策、用户偏好、未完成事项、重要事实、失败/错误信息（便于后续自我修正）。只输出摘要，不要其他内容。
+本块对话：
+---
+{chunk}
+---
 
-对话历史：
+当前摘要：
 ---
-{history}
+{prev_summary}
 ---
-摘要："""
+
+合并后的新摘要："""
+
+# memory flush：基于 compaction 摘要 + 现有 memory，追加到 memory/YYYY-MM-DD.md 与 MEMORY.md
+MEMORY_FLUSH_FROM_SUMMARY_PROMPT = """你正在根据「对话摘要」与「现有记忆内容」决定是否追加到记忆文件。
+
+【重要】仅追加摘要中有价值且现有记忆中尚未包含的内容。严禁重复追加 memory 中已有的内容。
+
+请调用 memory_append 工具，path 填 memory/YYYY-MM-DD.md（当日）或 MEMORY.md，content 填要追加的纯文本。
+- memory/YYYY-MM-DD.md：当日笔记、进度、临时事实
+- MEMORY.md：长期事实、用户偏好、重要决策
+
+若摘要中无新内容可写，或内容已存在于下方 memory 中，请回复 NO_REPLY。不要输出纯文本，仅 tool call 或 NO_REPLY。"""
 
 
 def should_flush(

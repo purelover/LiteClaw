@@ -120,6 +120,9 @@ def run():
     if tools_config["memory"].get("enabled"):
         from storage.workspace import ensure_workspace
         ensure_workspace(Path(memory_workspace))
+    if exec_enabled or tools_config["file"].get("enabled"):
+        from storage.workspace import ensure_workspace
+        ensure_workspace(Path(workspace))
     load_builtin_tools(
         exec_timeout=exec_timeout,
         workspace=workspace,
@@ -156,6 +159,8 @@ def run():
             register_skill_read_tool()
 
     enable_thinking = local_cfg.get("enable_thinking", False)
+    agent_cfg = cfg.get("agent", {}) or {}
+    temperature = agent_cfg.get("temperature")
     tool_failure_state: dict = {}  # 工具执行失败状态，供 hybrid fallback 使用
 
     def chat_fn(messages: list, tools: list | None) -> dict:
@@ -166,7 +171,7 @@ def run():
                     pt = estimate_messages_tokens(msgs) + estimate_tools_tokens(t)
                     log("llm", "chat_with_tools 本地 (Ollama) prompt_tokens≈%d...", pt)
                     extra = None if enable_thinking else {"think": False}
-                    r = chat_with_tools(ollama_client, local_model, msgs, t, extra_body=extra)
+                    r = chat_with_tools(ollama_client, local_model, msgs, t, extra_body=extra, temperature=temperature)
                     log("llm", "chat_with_tools 本地返回, content_len=%d tool_calls=%d",
                         len(r.get("content", "") or ""), len(r.get("tool_calls") or []))
                     return r
@@ -174,7 +179,7 @@ def run():
                 def call_cloud(mid, msgs, t):
                     pt = estimate_messages_tokens(msgs) + estimate_tools_tokens(t)
                     log("llm", "chat_with_tools 云端 (Doubao) model=%s prompt_tokens≈%d...", mid[:20] if mid else "", pt)
-                    r = chat_with_tools(doubao, mid, msgs, t)
+                    r = chat_with_tools(doubao, mid, msgs, t, temperature=temperature)
                     log("llm", "chat_with_tools 云端返回, content_len=%d tool_calls=%d",
                         len(r.get("content", "") or ""), len(r.get("tool_calls") or []))
                     return r
@@ -185,11 +190,11 @@ def run():
                     call_local=call_local,
                     call_cloud=call_cloud,
                     cloud_chain=cloud_chain,
-                    force_cloud=get_tool_failure_state().get("use_cloud", False),
+                    cloud_index=get_tool_failure_state().get("cloud_index", -1),
                 )
             pt = estimate_messages_tokens(messages) + estimate_tools_tokens(tools)
             log("llm", "chat_with_tools 云端 (Doubao) model=%s prompt_tokens≈%d...", model_id[:20] if model_id else "", pt)
-            resp = chat_with_tools(doubao, model_id, messages, tools)
+            resp = chat_with_tools(doubao, model_id, messages, tools, temperature=temperature)
             log("llm", "chat_with_tools 云端返回, content_len=%d tool_calls=%d",
                 len(resp.get("content", "") or ""), len(resp.get("tool_calls") or []))
             return resp
@@ -198,7 +203,7 @@ def run():
             return {"content": content, "tool_calls": []}
         pt = estimate_messages_tokens(messages)
         log("llm", "doubao_chat 开始 prompt_tokens≈%d...", pt)
-        content = doubao_chat(doubao, model_id, messages)
+        content = doubao_chat(doubao, model_id, messages, temperature=temperature)
         log("llm", "doubao_chat 返回, len=%d", len(content) if content else 0)
         return {"content": content, "tool_calls": []}
 
@@ -206,14 +211,14 @@ def run():
         def call_local(msgs):
             pt = estimate_messages_tokens(msgs)
             log("llm", "call_local (Ollama) 开始 prompt_tokens≈%d...", pt)
-            r = ollama_chat(ollama_client, local_model, msgs, enable_thinking=enable_thinking)
+            r = ollama_chat(ollama_client, local_model, msgs, enable_thinking=enable_thinking, temperature=temperature)
             log("llm", "call_local 返回, len=%d", len(r) if r else 0)
             return r
 
         def call_cloud(mid, msgs):
             pt = estimate_messages_tokens(msgs)
             log("llm", "call_cloud (Doubao) 开始 model=%s prompt_tokens≈%d...", mid[:20] if mid else "", pt)
-            r = doubao_chat(doubao, mid, msgs)
+            r = doubao_chat(doubao, mid, msgs, temperature=temperature)
             log("llm", "call_cloud 返回, len=%d", len(r) if r else 0)
             return r
 
@@ -234,7 +239,6 @@ def run():
         tools_config["im"].get("enabled"),
     ])
 
-    agent_cfg = cfg.get("agent", {}) or {}
     max_tool_rounds = agent_cfg.get("max_tool_rounds", 10)
 
     agent = Agent(

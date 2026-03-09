@@ -64,9 +64,10 @@ def load_builtin_tools(
     search_enabled = cfg.get("search", {}).get("enabled", False)
 
     if exec_enabled:
-        from .exec_tool import get_tools_definitions, TOOL_EXECUTORS
+        from .exec_tool import get_tools_definitions, _make_executors as make_exec_exec
         defs = get_tools_definitions(exec_timeout)
-        executors = {k: _wrap_exec(v, exec_timeout) for k, v in TOOL_EXECUTORS.items()}
+        exec_executors = make_exec_exec(workspace)
+        executors = {k: _wrap_exec(v, exec_timeout) for k, v in exec_executors.items()}
         register_tools(defs, executors)
 
     if file_enabled:

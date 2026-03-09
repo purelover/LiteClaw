@@ -21,6 +21,7 @@ def run_locally(
     lang: str,
     *,
     timeout_sec: int | float = 30,
+    cwd: str | Path | None = None,
 ) -> ExecResult:
     """
     在本机直接执行代码。
@@ -28,6 +29,7 @@ def run_locally(
     - code: 要执行的代码
     - lang: 语言标识，如 python、bash
     - timeout_sec: 执行超时（秒）
+    - cwd: 工作目录，默认 None 使用进程当前目录；建议传 workspace 以便生成的文件与 send_file 等工具一致
 
     返回 ExecResult(stdout, stderr, return_code, success)
     """
@@ -50,14 +52,16 @@ def run_locally(
         else:
             cmd = ["bash", script_path]
 
-        proc = subprocess.run(
-            cmd,
+        run_kw = dict(
             capture_output=True,
             text=True,
             timeout=timeout_sec,
             encoding="utf-8",
             errors="replace",
         )
+        if cwd is not None:
+            run_kw["cwd"] = str(Path(cwd).resolve())
+        proc = subprocess.run(cmd, **run_kw)
 
         return ExecResult(
             stdout=proc.stdout or "",

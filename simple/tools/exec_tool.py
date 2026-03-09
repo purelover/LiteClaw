@@ -1,21 +1,23 @@
 """
 Exec 工具：供 Agent 调用的代码执行
 """
+from pathlib import Path
+
 from exec.local_exec import run_locally
 
 
-def exec_python(code: str, timeout_sec: int = 30) -> str:
-    """执行 Python 代码"""
-    r = run_locally(code, "python", timeout_sec=timeout_sec)
+def exec_python(code: str, timeout_sec: int = 30, workspace: str | Path | None = None) -> str:
+    """执行 Python 代码。workspace 为工作目录，默认与 send_file 等一致"""
+    r = run_locally(code, "python", timeout_sec=timeout_sec, cwd=workspace)
     if r.success:
         return r.stdout if r.stdout else "(无输出)"
     return f"[错误] {r.stderr}\n退出码: {r.return_code}"
 
 
-def exec_bash(code: str = "", command: str = "", timeout_sec: int = 30) -> str:
-    """执行 Bash 脚本。参数 code 或 command 均可（兼容模型传 command）"""
+def exec_bash(code: str = "", command: str = "", timeout_sec: int = 30, workspace: str | Path | None = None) -> str:
+    """执行 Bash 脚本。参数 code 或 command 均可（兼容模型传 command）。workspace 为工作目录"""
     script = (code or command or "").strip()
-    r = run_locally(script, "bash", timeout_sec=timeout_sec)
+    r = run_locally(script, "bash", timeout_sec=timeout_sec, cwd=workspace)
     if r.success:
         return r.stdout if r.stdout else "(无输出)"
     return f"[错误] {r.stderr}\n退出码: {r.return_code}"
@@ -67,7 +69,10 @@ def _exec_bash_kw(kw: dict) -> str:
     return (kw.get("code") or kw.get("command") or "").strip()
 
 
-TOOL_EXECUTORS = {
-    "exec_python": lambda **kw: exec_python(kw.get("code", ""), timeout_sec=_coerce_timeout(kw)),
-    "exec_bash": lambda **kw: exec_bash(code=_exec_bash_kw(kw), timeout_sec=_coerce_timeout(kw)),
-}
+def _make_executors(workspace: str | Path | None = None):
+    """返回绑定 workspace 的 executors，脚本在 workspace 下执行，生成文件与 send_file 等一致"""
+    wp = Path(workspace) if workspace else None
+    return {
+        "exec_python": lambda **kw: exec_python(kw.get("code", ""), timeout_sec=_coerce_timeout(kw), workspace=wp),
+        "exec_bash": lambda **kw: exec_bash(code=_exec_bash_kw(kw), timeout_sec=_coerce_timeout(kw), workspace=wp),
+    }

@@ -8,6 +8,7 @@ gateway:
 # Agent
 agent:
   max_tool_rounds: 20  # 单次对话最大工具调用轮数，超则返回「工具调用轮次过多」
+  temperature: 0.2    # 任务执行场景建议 0.1~0.3，降低随机性、提升 tool call 稳定性；不设则用模型默认
 
 # 存储（SQLite）
 storage:
@@ -22,11 +23,10 @@ compaction:
   target_after_compaction: 10000  # 压缩后目标 token 数，留足余量
   keep_recent_tokens: 6000   # 压缩时保留最近 token 数
   summary_max_tokens: 1500   # 历史摘要上限
-  keep_recent_tokens: 8000   # 压缩时保留最近 token 数
+  chunk_size_tokens: 4000    # 增量压缩每块 token 数
   memory_flush:
     enabled: true
     soft_threshold_tokens: 2000   # 接近压缩前 N token 时触发 flush
-    prompt: "Call memory_append tool (path+content). Extract key facts. Use memory/YYYY-MM-DD.md or MEMORY.md. NO_REPLY only if nothing to store. Do not output plain text."
 
 # 工具执行
 exec:

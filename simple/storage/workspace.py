@@ -99,6 +99,18 @@ def build_memory_context(
     return "\n\n".join(parts) if parts else ""
 
 
+def load_memory_for_flush(workspace: Path) -> str:
+    """加载 MEMORY.md 与当日 memory/YYYY-MM-DD.md，供 memory flush 时避免重复追加"""
+    parts = []
+    mem = _read_file_safe(workspace / "MEMORY.md")
+    if mem:
+        parts.append("## MEMORY.md（长期记忆）\n" + mem)
+    today = datetime.now().strftime("%Y-%m-%d")
+    daily = _read_file_safe(workspace / "memory" / f"{today}.md")
+    if daily:
+        parts.append(f"## memory/{today}.md（当日记忆）\n" + daily)
+    return "\n\n".join(parts) if parts else "(无现有记忆)"
+
 def load_recitation_context(workspace: Path) -> str:
     """
     加载 Recitation 上下文：TODO.md + NOTES.md。
