@@ -33,7 +33,7 @@ from llm.compaction import (
     should_flush,
     should_compact,
     is_no_reply,
-    COMPACTION_CHUNK_PROMPT,
+    COMPACTION_MERGE_PROMPT,
     MEMORY_FLUSH_FROM_SUMMARY_PROMPT,
 )
 
@@ -221,18 +221,15 @@ class Agent:
 
     def _run_compaction_and_flush(self, session) -> None:
         """
-        统一 compaction + memory flush：共享同一份增量压缩结果。
-        1. 增量 compaction：按 chunk 压缩，每次输入 chunk + summary，输出新 summary（≤summary_max）
-        2. compaction 结果直接存 session.context
-        3. memory flush：摘要 + 当日 memory/ + MEMORY.md 单次 LLM 调用，追加到 memory 文件（不重复已有内容）
+        统一 compaction + memory flush：共享同一份压缩结果。
+        1. compaction：输入=现有摘要+新消息，输出=合并后的新摘要（单次 LLM 调用）
+        2. memory flush：摘要 + 当日 memory/ + MEMORY.md 单次 LLM 调用，追加到 memory 文件（不重复已有内容）
         """
         cfg = self.compaction_cfg
-        ctx_window = cfg.get("context_window", 32000)
         reserve = cfg.get("reserve_tokens", 4000)
         keep_recent = cfg.get("keep_recent_tokens", 6000)
         target = cfg.get("target_after_compaction", 10000)
         summary_max = cfg.get("summary_max_tokens", 1500)
-        chunk_size = cfg.get("chunk_size_tokens", 4000)
         mf = cfg.get("memory_flush", {}) or {}
         mf_enabled = mf.get("enabled", False)
 
@@ -263,44 +260,19 @@ class Agent:
             limit = 800 if is_error else default_len
             return f"{m.get('role','')}: {content[:limit]}" + ("..." if len(content) > limit else "")
 
-        # 按 chunk 切分（不跨消息）
-        chunks: list[list[dict]] = []
-        cur: list[dict] = []
-        cur_tokens = 0
-        for m in old:
-            t = estimate_message_tokens(m)
-            if cur_tokens + t > chunk_size and cur:
-                chunks.append(cur)
-                cur = []
-                cur_tokens = 0
-            cur.append(m)
-            cur_tokens += t
-        if cur:
-            chunks.append(cur)
-
-        # 增量压缩：summary = compress(chunk + summary)，每步输出 ≤ summary_max
-        summary = ""
-        prev_summary = session.context.get("compaction_summary", "")
-        for i, chunk in enumerate(chunks):
-            chunk_text = "\n".join(_history_snippet(m) for m in chunk)
-            prompt = COMPACTION_CHUNK_PROMPT.format(chunk=chunk_text, prev_summary=summary or "(无)")
-            summary_messages = [
-                {"role": "system", "content": "你是一个对话摘要助手，只输出摘要，不要其他内容。"},
-                {"role": "user", "content": prompt},
-            ]
-            try:
-                resp = self.chat_fn(summary_messages, None)
-                summary = (resp.get("content") or "").strip()[:500]
-            except Exception as e:
-                log("agent", "compaction chunk[%d] 摘要失败: %s", i, e)
-                summary = (summary or "") + "\n[本块摘要失败]"
-            if estimate_tokens(summary) > summary_max:
-                summary = summary[: summary_max * 2] + "\n[... 已截断]"
-        log("agent", "compaction 增量完成: %d chunks, 保留 %d 条", len(chunks), len(recent))
-
-        new_summary = (prev_summary + "\n" + summary).strip() if prev_summary else summary
+        prev_summary = session.context.get("compaction_summary", "") or "(无)"
+        new_messages_text = "\n".join(_history_snippet(m) for m in old)
+        prompt = COMPACTION_MERGE_PROMPT.format(prev_summary=prev_summary, new_messages=new_messages_text)
+        # 不传 system：指令已在 prompt 中，system 会严重拖慢 Ollama
+        summary_messages = [{"role": "user", "content": prompt}]
+        try:
+            resp = self.chat_fn(summary_messages, None)
+            new_summary = (resp.get("content") or "").strip()[:500]
+        except Exception as e:
+            log("agent", "compaction 摘要失败: %s", e)
+            new_summary = "[摘要生成失败，已截断旧消息]"
         if estimate_tokens(new_summary) > summary_max:
-            new_summary = new_summary[: summary_max * 2] + "\n[... 更早摘要已截断]"
+            new_summary = new_summary[: summary_max * 2] + "\n[... 已截断]"
 
         compaction_count = session.context.get("compaction_count", 0) + 1
         session.conversation_history = recent
@@ -318,7 +290,11 @@ class Agent:
             return
 
         existing_memory = load_memory_for_flush(self.workspace_path)
-        flush_content = f"""## 对话摘要（待写入记忆）
+        flush_content = f"""{MEMORY_FLUSH_FROM_SUMMARY_PROMPT}
+
+---
+
+## 对话摘要（待写入记忆）
 
 {new_summary}
 
@@ -326,17 +302,11 @@ class Agent:
 
 ## 现有记忆（请勿重复追加）
 
-{existing_memory}
-
----
-
-{MEMORY_FLUSH_FROM_SUMMARY_PROMPT}"""
+{existing_memory}"""
 
         tools = get_definitions() if self.tools_enabled else None
-        messages = [
-            {"role": "system", "content": "你负责将对话摘要中有价值的内容追加到记忆文件。仅追加摘要中有且现有记忆中未包含的内容。严禁重复。"},
-            {"role": "user", "content": flush_content},
-        ]
+        # 不传 system：指令已在 flush_content 开头，system 会严重拖慢 Ollama（实测 11s vs 97s）
+        messages = [{"role": "user", "content": flush_content}]
         try:
             resp = self.chat_fn(messages, tools)
             content = (resp.get("content") or "").strip()

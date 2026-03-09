@@ -1,6 +1,6 @@
 """
 Context 压缩与 memory flush（共享 compaction 结果）
-- 增量 compaction：按 chunk 压缩，避免 O(n²) attention
+- compaction：输入=现有摘要+新消息，输出=合并后的新摘要（单次 LLM 调用）
 - memory flush：基于 compaction 摘要 + 现有 memory 文件，单次 LLM 调用追加
 """
 from util.log import log
@@ -8,17 +8,17 @@ from util.log import log
 
 NO_REPLY = "NO_REPLY"
 
-# 增量 compaction：每 chunk 输入为「本块内容 + 当前摘要」，输出为新摘要（≤summary_max）
-COMPACTION_CHUNK_PROMPT = """请将以下「本块对话」与「当前摘要」合并为一段简洁摘要（200字以内），保留：关键决策、用户偏好、未完成事项、重要事实、失败/错误信息。只输出摘要，不要其他内容。
+# compaction：输入=现有摘要+上次 compaction 之后的新消息，输出=合并后的新摘要（≤summary_max）
+COMPACTION_MERGE_PROMPT = """请将以下「现有摘要」与「新对话」合并为一段简洁摘要（200字以内），保留：关键决策、用户偏好、未完成事项、重要事实、失败/错误信息。去重、整合，只输出合并后的摘要，不要其他内容。
 
-本块对话：
----
-{chunk}
----
-
-当前摘要：
+现有摘要：
 ---
 {prev_summary}
+---
+
+新对话（上次压缩之后产生的消息）：
+---
+{new_messages}
 ---
 
 合并后的新摘要："""
