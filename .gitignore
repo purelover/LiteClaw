@@ -7,6 +7,9 @@ simple/skills-openclaw/
 # 文档（内部设计/对比笔记）
 simple/docs/
 
+# 脚本（bench/debug，本地使用）
+simple/scripts/
+
 # Python
 __pycache__/
 *.py[cod]
