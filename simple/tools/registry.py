@@ -84,9 +84,9 @@ def load_builtin_tools(
         register_tools(defs, make_browser_exec(workspace=wp, timeout_sec=timeout))
 
     if system_enabled:
-        from .system_tool import get_tools_definitions as get_sys_defs, TOOL_EXECUTORS as sys_exec
+        from .system_tool import get_tools_definitions as get_sys_defs, _make_executors as make_sys_exec
         defs = get_sys_defs(exec_timeout)
-        register_tools(defs, sys_exec)
+        register_tools(defs, make_sys_exec(exec_timeout))
 
     if automation_enabled:
         from .automation_tool import get_tools_definitions as get_auto_defs, TOOL_EXECUTORS as auto_exec
@@ -146,7 +146,11 @@ def load_plugins(plugin_dirs: list[str | Path] | None = None, base_dir: Path | N
 
 
 def _wrap_exec(fn, timeout: int):
+    """exec 工具：取 config 与模型传入的较大值，避免模型传过小导致超时"""
+
     def _wrapped(**kw):
-        kw.setdefault("timeout_sec", timeout)
+        val = kw.get("timeout_sec")
+        model_val = int(float(val)) if val is not None else timeout
+        kw["timeout_sec"] = max(model_val, timeout)
         return fn(**kw)
     return _wrapped

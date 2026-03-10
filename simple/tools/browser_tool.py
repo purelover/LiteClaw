@@ -149,20 +149,27 @@ def get_tools_definitions(timeout_sec: int = 30) -> list[dict]:
     ]
 
 
+def _effective_timeout(kw: dict, config_default: int) -> int:
+    """取 config 与模型传入的较大值，避免模型传过小导致超时"""
+    val = kw.get("timeout_sec")
+    model_val = int(float(val)) if val is not None else config_default
+    return max(model_val, config_default)
+
+
 def _make_executors(workspace: Optional[Path] = None, timeout_sec: int = 30) -> dict:
     """创建带 workspace 的浏览器工具执行器，截图保存到 workspace 目录"""
     wp = Path(workspace) if workspace else None
     return {
-        "browser_navigate": lambda **kw: browser_navigate(kw.get("url", ""), timeout_sec=kw.get("timeout_sec", timeout_sec)),
+        "browser_navigate": lambda **kw: browser_navigate(kw.get("url", ""), timeout_sec=_effective_timeout(kw, timeout_sec)),
         "browser_screenshot": lambda **kw: browser_screenshot(
             kw.get("url", ""),
-            timeout_sec=int(float(kw.get("timeout_sec") or timeout_sec)),
+            timeout_sec=_effective_timeout(kw, timeout_sec),
             output_path=kw.get("output_path"),
             workspace=wp,
         ),
         "browser_content": lambda **kw: browser_content(
             kw.get("url", ""),
             selector=kw.get("selector"),
-            timeout_sec=kw.get("timeout_sec", timeout_sec),
+            timeout_sec=_effective_timeout(kw, timeout_sec),
         ),
     }

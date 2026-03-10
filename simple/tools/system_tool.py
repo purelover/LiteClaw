@@ -106,13 +106,24 @@ def get_tools_definitions(timeout_sec: int = 30) -> list[dict]:
     ]
 
 
-TOOL_EXECUTORS = {
-    "process_list": lambda **kw: process_list(
-        limit=kw.get("limit", 20),
-        filter_name=kw.get("filter_name"),
-    ),
-    "exec_command": lambda **kw: exec_command(
-        kw.get("command", ""),
-        timeout_sec=kw.get("timeout_sec", 30),
-    ),
-}
+def _make_executors(timeout_sec: int = 30) -> dict:
+    """创建系统工具执行器，exec_command 取 config 与模型传入的较大值"""
+
+    def _effective_timeout(kw: dict) -> int:
+        val = kw.get("timeout_sec")
+        model_val = int(float(val)) if val is not None else timeout_sec
+        return max(model_val, timeout_sec)
+
+    return {
+        "process_list": lambda **kw: process_list(
+            limit=kw.get("limit", 20),
+            filter_name=kw.get("filter_name"),
+        ),
+        "exec_command": lambda **kw: exec_command(
+            kw.get("command", ""),
+            timeout_sec=_effective_timeout(kw),
+        ),
+    }
+
+
+TOOL_EXECUTORS = _make_executors(30)  # 兼容直接 import
