@@ -7,6 +7,7 @@ from openai import OpenAI
 
 from util.log import log
 from llm.tool_call_parser import parse_tool_calls_from_text
+from llm.stats import record as record_llm_stats
 
 
 def chat_with_tools(
@@ -33,6 +34,15 @@ def chat_with_tools(
         kwargs["extra_body"] = extra_body
 
     resp = client.chat.completions.create(**kwargs)
+    usage = getattr(resp, "usage", None)
+    if usage:
+        record_llm_stats(
+            model,
+            getattr(usage, "prompt_tokens", 0) or 0,
+            getattr(usage, "completion_tokens", 0) or 0,
+        )
+    else:
+        record_llm_stats(model, 0, 0)
     msg = resp.choices[0].message
     content = msg.content or ""
     tool_calls = []

@@ -82,10 +82,17 @@ class Agent:
         return "\n\n".join(p for p in parts if p)
 
     def _get_current_task_reminder(
-        self, history: list[dict], user_content: str
+        self, history: list[dict], user_content: str | list
     ) -> str | None:
         """当用户说「做吧」「继续」等简短跟进时，从历史中提取上一个实质性请求；或当用户发来任务型请求时强化「务必执行」"""
-        uc = (user_content or "").strip()
+        if isinstance(user_content, list):
+            uc = " ".join(
+                p.get("text", "") for p in user_content
+                if isinstance(p, dict) and p.get("type") == "text"
+            )
+        else:
+            uc = user_content or ""
+        uc = uc.strip()
         # 简短跟进：从历史提取上一个请求
         if len(uc) <= 30:
             follow_ups = ("做吧", "做啊", "你做", "继续", "快点", "别光说", "不要光打嘴炮")

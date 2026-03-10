@@ -5,6 +5,7 @@ import httpx
 from openai import OpenAI
 
 from util.log import log
+from llm.stats import record as record_llm_stats
 
 
 def create_client(base_url: str = "http://localhost:11434/v1"):
@@ -39,6 +40,15 @@ def chat(
         log("ollama", "错误详情: %s", e)
         log("ollama", "base_url=%r", getattr(client, "base_url", "?"))
         raise
+    usage = getattr(resp, "usage", None)
+    if usage:
+        record_llm_stats(
+            model,
+            getattr(usage, "prompt_tokens", 0) or 0,
+            getattr(usage, "completion_tokens", 0) or 0,
+        )
+    else:
+        record_llm_stats(model, 0, 0)
     if stream:
         return "".join(chunk.choices[0].delta.content or "" for chunk in resp)
     return resp.choices[0].message.content or ""

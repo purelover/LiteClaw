@@ -5,6 +5,8 @@ import os
 import httpx
 from openai import OpenAI
 
+from llm.stats import record as record_llm_stats
+
 
 def create_client(api_key: str | None = None, base_url: str = "https://ark.cn-beijing.volces.com/api/v3"):
     """创建豆包客户端
@@ -29,6 +31,15 @@ def chat(
     if temperature is not None:
         kwargs["temperature"] = temperature
     resp = client.chat.completions.create(**kwargs)
+    usage = getattr(resp, "usage", None)
+    if usage:
+        record_llm_stats(
+            endpoint_id,
+            getattr(usage, "prompt_tokens", 0) or 0,
+            getattr(usage, "completion_tokens", 0) or 0,
+        )
+    else:
+        record_llm_stats(endpoint_id, 0, 0)
     if stream:
         return "".join(chunk.choices[0].delta.content or "" for chunk in resp)
     return resp.choices[0].message.content or ""

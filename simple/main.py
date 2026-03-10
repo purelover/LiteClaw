@@ -78,6 +78,11 @@ def run():
         ollama_client = create_ollama_client(base_url)
         local_model = local_cfg.get("model", "llama3.2")
 
+    # LLM 统计：注册已知模型，每次请求后打印全部（未使用的标「本次未使用」）
+    from llm.stats import set_known_models
+    known = ([local_model] if use_hybrid and ollama_client else []) + list(cloud_chain)
+    set_known_models(known)
+
     # 飞书
     fs = cfg.get("feishu", {})
     app_id = fs.get("app_id") or os.environ.get("FEISHU_APP_ID")
